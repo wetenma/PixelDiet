@@ -49,17 +49,18 @@ fun MainScreen(viewModel: SharedViewModel = viewModel()) {
                 modifier = Modifier.fillMaxWidth()
             ) { Text("목표 시간 설정") }
         }
-        // 3. 시각적 알림
+        // 3. 시각적 알림 (이 부분은 동일)
         item { VisualNotification(appList) }
-        // 4. 전체 프로그레스바
+        // 4. 전체 프로그레스바 (이 부분은 동일)
         item { TotalProgress(totalUsage.first, totalUsage.second) }
         // 5. 개별 앱 리스트
         items(appList, key = { it.appName.name }) { app ->
-            AppProgressItem(app)
+            // ⭐️ AppProgressItem -> AppUsageCard로 변경 (이전 수정 사항 반영)
+            AppUsageCard(app)
         }
     }
 
-    // 6. 목표 설정 다이얼로그
+    // 6. 목표 설정 다이얼로그 (showGoalDialog가 true일 때만 보임)
     if (showGoalDialog) {
         GoalSettingDialog(
             appList = appList,
@@ -72,7 +73,7 @@ fun MainScreen(viewModel: SharedViewModel = viewModel()) {
     }
 }
 
-// 3. 시각적 알림
+// 3. 시각적 알림 (동일)
 @Composable
 fun VisualNotification(appList: List<AppUsage>) {
     val appsWithUsage = appList.filter { it.currentUsage > 0 }
@@ -104,6 +105,7 @@ fun TotalProgress(totalUsage: Int, totalGoal: Int) {
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 Text("총 사용시간", fontSize = 14.sp, color = Color.Gray)
                 Row {
+                    // ⭐️ [수정] formatTime 함수 사용
                     Text(formatTime(totalUsage), fontSize = 14.sp, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(end = 16.dp))
                     Text("목표 ${formatTime(totalGoal)}", fontSize = 14.sp, color = MaterialTheme.colorScheme.error)
                 }
@@ -115,40 +117,22 @@ fun TotalProgress(totalUsage: Int, totalGoal: Int) {
     }
 }
 
-// 5. 개별 앱 아이템
-@Composable
-fun AppProgressItem(app: AppUsage) {
-    Card(modifier = Modifier.fillMaxWidth(), elevation = CardDefaults.cardElevation(2.dp)) {
-        Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.width(60.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                Box(Modifier.size(40.dp).background(app.appName.composeColor))
-                Text(formatTime(app.goalTime), fontSize = 12.sp, color = Color.Gray, modifier = Modifier.padding(top = 4.dp))
-            }
-            Spacer(Modifier.width(12.dp))
-            val progress = if (app.goalTime > 0) (app.currentUsage.toFloat() / app.goalTime).coerceAtMost(1f) else 0f
-            LinearProgressIndicator(progress = { progress }, modifier = Modifier.weight(1f).height(12.dp))
-            Spacer(Modifier.width(12.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                val icon = if (app.streak >= 0) "🔥" else "💀"
-                Text(icon, fontSize = 20.sp, modifier = Modifier.padding(end = 4.dp))
-                Text(Math.abs(app.streak).toString(), fontSize = 16.sp)
-            }
-        }
-    }
-}
 
-// 6. 목표 설정 다이얼로그
+// ⭐️ 6. [수정됨] 목표 설정 다이얼로그 Composable
 @Composable
 fun GoalSettingDialog(
     appList: List<AppUsage>,
     onDismiss: () -> Unit,
     onSave: (Map<AppName, Int>) -> Unit
 ) {
+    // ⭐️ [수정] (시, 분) Pair를 String으로 저장
     val goalStates = remember {
-        mutableStateMapOf<AppName, String>().apply {
+        mutableStateMapOf<AppName, Pair<String, String>>().apply {
             AppName.values().forEach { appName ->
-                val hours = (appList.find { it.appName == appName }?.goalTime ?: 0) / 60
-                put(appName, hours.toString())
+                val currentMinutes = appList.find { it.appName == appName }?.goalTime ?: 0
+                val hours = (currentMinutes / 60).toString()
+                val minutes = (currentMinutes % 60).toString()
+                put(appName, Pair(hours, minutes))
             }
         }
     }
@@ -157,21 +141,49 @@ fun GoalSettingDialog(
         onDismissRequest = onDismiss,
         title = { Text("목표 시간 설정") },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                AppName.values().forEach { appName ->
-                    Text(appName.displayName, fontWeight = FontWeight.Bold)
-                    OutlinedTextField(
-                        value = goalStates[appName] ?: "0",
-                        onValueChange = { goalStates[appName] = it.filter { char -> char.isDigit() } },
-                        label = { Text("시간 단위로 입력") },
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
-                    )
+            // ⭐️ [수정] 시/분 입력을 위해 LazyColumn 사용
+            LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                items(AppName.values()) { appName ->
+                    Text(appName.displayName, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 8.dp))
+
+                    // ⭐️ [신규] "시"와 "분"을 가로로 배치
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        val (hours, minutes) = goalStates[appName] ?: Pair("0", "0")
+
+                        // "시" 입력창
+                        OutlinedTextField(
+                            value = hours,
+                            onValueChange = {
+                                // 숫자만 입력받도록 필터링
+                                goalStates[appName] = Pair(it.filter { char -> char.isDigit() }, minutes)
+                            },
+                            label = { Text("시간") },
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            modifier = Modifier.weight(1f)
+                        )
+                        // "분" 입력창
+                        OutlinedTextField(
+                            value = minutes,
+                            onValueChange = {
+                                // 숫자만 입력받도록 필터링
+                                goalStates[appName] = Pair(hours, it.filter { char -> char.isDigit() })
+                            },
+                            label = { Text("분") },
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
                 }
             }
         },
         confirmButton = {
             Button(onClick = {
-                val newGoals = goalStates.mapValues { (it.value.toIntOrNull() ?: 0) * 60 }
+                // ⭐️ [수정] (시 * 60) + 분 = 총 분으로 변환
+                val newGoals = goalStates.mapValues {
+                    val hours = it.value.first.toIntOrNull() ?: 0
+                    val minutes = it.value.second.toIntOrNull() ?: 0
+                    (hours * 60) + minutes
+                }
                 onSave(newGoals)
             }) { Text("저장") }
         },
@@ -179,9 +191,9 @@ fun GoalSettingDialog(
     )
 }
 
-// 시간 포맷 유틸
+// ⭐️ [수정됨] 시간 포맷 유틸 (H:MM:SS -> H시간 M분)
 private fun formatTime(minutes: Int): String {
     val hours = minutes / 60
     val mins = minutes % 60
-    return String.format("%d:%02d:00", hours, mins)
+    return String.format("%d시간 %02d분", hours, mins)
 }

@@ -32,30 +32,17 @@ fun AppUsageCard(appUsage: AppUsage) {
             ) {
                 // 아이콘 표시 (AsyncImage)
                 if (appUsage.icon != null) {
-                    // ⭐️ [수정] 배경색 Box를 아이콘 뒤에 두어, 아이콘이 투명한 부분에 나타날 수 있도록 변경
-                    Box(
-                        modifier = Modifier
-                            .size(40.dp)
-                            .background(appUsage.appName.composeColor, RoundedCornerShape(8.dp)) // 아이콘이 없는 경우를 위한 배경
-                    ) {
-                        AsyncImage(
-                            model = appUsage.icon,
-                            contentDescription = appUsage.appName.displayName,
-                            modifier = Modifier
-                                .fillMaxSize() // Box 크기에 맞게 채우기
-                                .padding(2.dp) // 약간의 패딩으로 둥근 테두리 살리기
-                        )
-                    }
+                    AsyncImage(
+                        model = appUsage.icon,
+                        contentDescription = appUsage.appName.displayName,
+                        modifier = Modifier.size(40.dp)
+                    )
                 } else {
-                    // 아이콘이 없을 경우 (에러 또는 앱 미설치)
                     Box(
                         modifier = Modifier
                             .size(40.dp)
-                            .background(appUsage.appName.composeColor, RoundedCornerShape(8.dp)),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text("?", color = Color.White, fontSize = 24.sp) // 임시로 "?" 표시
-                    }
+                            .background(appUsage.appName.composeColor, RoundedCornerShape(8.dp))
+                    )
                 }
                 Spacer(modifier = Modifier.width(16.dp))
                 Text(
@@ -82,7 +69,8 @@ fun AppUsageCard(appUsage: AppUsage) {
 
             // 사용 시간 / 목표 시간 (ProgressBar)
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(text = "${appUsage.currentUsage}분", fontSize = 14.sp)
+                // ⭐️ 1. [수정] formatTime 함수 사용
+                Text(text = formatTime(appUsage.currentUsage), fontSize = 14.sp)
                 Spacer(modifier = Modifier.width(8.dp))
                 LinearProgressIndicator(
                     progress = { if (appUsage.goalTime > 0) appUsage.currentUsage.toFloat() / appUsage.goalTime.toFloat() else 0f },
@@ -93,12 +81,21 @@ fun AppUsageCard(appUsage: AppUsage) {
                     trackColor = Color.LightGray
                 )
                 Spacer(modifier = Modifier.width(8.dp))
-                Text(text = "${appUsage.goalTime}분", fontSize = 14.sp)
+                // ⭐️ 2. [수정] formatTime 함수 사용
+                Text(text = formatTime(appUsage.goalTime), fontSize = 14.sp)
             }
         }
     }
 }
 
+// ⭐️ 3. [신규] 시간 포맷 유틸 (H:MM:SS -> H시간 M분)
+private fun formatTime(minutes: Int): String {
+    val hours = minutes / 60
+    val mins = minutes % 60
+    return String.format("%d시간 %02d분", hours, mins)
+}
+
+// Preview용 더미 데이터
 @Preview(showBackground = true)
 @Composable
 fun AppUsageCardPreview() {
