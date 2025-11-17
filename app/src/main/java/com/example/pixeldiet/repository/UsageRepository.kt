@@ -17,6 +17,9 @@ import kotlin.random.Random
 
 object UsageRepository {
 
+    // ⭐️ SharedPreferences 인스턴스를 저장할 변수
+    private var prefs: NotificationPrefs? = null
+
     private val _appUsageList = MutableLiveData<List<AppUsage>>()
     val appUsageList: LiveData<List<AppUsage>> = _appUsageList
 
@@ -28,26 +31,36 @@ object UsageRepository {
 
     private val currentGoals = mutableMapOf<AppName, Int>()
 
+    // ⭐️ [수정] init 블록: 0값 초기화
     init {
-        _notificationSettings.value = NotificationSettings()
-
-        // 앱이 시작될 때 0값으로 초기화
         val initialList = AppName.values().map { appName ->
-            AppUsage(
-                appName = appName,
-                currentUsage = 0,
-                goalTime = 0,
-                streak = 0,
-                icon = null
-            )
+            AppUsage(appName, 0, 0, 0) // icon이 없는 4개 파라미터
         }
         _appUsageList.postValue(initialList)
+    }
+
+    // ⭐️ [신규] SharedPreferences를 초기화하는 함수
+    // (Context가 필요한 시점에 ViewModel이 호출)
+    private fun getPrefs(context: Context): NotificationPrefs {
+        if (prefs == null) {
+            prefs = NotificationPrefs(context.applicationContext)
+            // ⭐️ 초기화 시, SharedPreferences에서 설정을 불러와 LiveData에 반영
+            _notificationSettings.postValue(prefs!!.loadNotificationSettings())
+        }
+        return prefs!!
+    }
+
+    // ⭐️ [수정] SharedPreferences에 저장하도록 변경
+    fun updateNotificationSettings(settings: NotificationSettings, context: Context) { // ⭐️ Context 추가
+        // 1. SharedPreferences에 영구 저장
+        getPrefs(context).saveNotificationSettings(settings) // ⭐️ 전달받은 Context 사용
+        // 2. LiveData에 반영 (UI 즉시 업데이트용)
+        _notificationSettings.postValue(settings)
     }
 
     fun updateGoalTimes(goals: Map<AppName, Int>) {
         currentGoals.clear()
         currentGoals.putAll(goals)
-
         val currentList = _appUsageList.value!!
         val newList = currentList.map {
             it.copy(goalTime = currentGoals[it.appName] ?: 0)
@@ -55,11 +68,10 @@ object UsageRepository {
         _appUsageList.postValue(newList)
     }
 
-    fun updateNotificationSettings(newSettings: NotificationSettings) {
-        _notificationSettings.postValue(newSettings)
-    }
-
     suspend fun loadRealData(context: Context) {
+        // ⭐️ [수정] loadRealData가 호출될 때 prefs가 초기화되도록 보장
+        val prefs = getPrefs(context)
+
         val usageStatsManager = context.getSystemService(Context.USAGE_STATS_SERVICE) as UsageStatsManager
         val packageManager = context.packageManager
         val sdf = SimpleDateFormat("yyyy-MM-dd", Locale.KOREAN)
@@ -103,48 +115,36 @@ object UsageRepository {
         // --- 3. 어제까지의 스트릭 계산 ---
         val streakMap = calculateStreaks(newDailyList, currentGoals)
 
-        // --- 4. 최종 _appUsageList 생성 및 post (아이콘 포함) ---
+        // --- 4. 최종 _appUsageList 생성 (아이콘 로직 없음) ---
         val newAppUsageList = AppName.values().map { appName ->
-            val appIcon: Drawable? = try {
-                packageManager.getApplicationIcon(appName.packageName)
-            } catch (e: PackageManager.NameNotFoundException) { null }
-            catch (e: Exception) { null }
-
-            // ⭐️ --- [버그 수정 로직] --- ⭐️
             val todayUsage = todayUsageMap[appName] ?: 0
             val goal = currentGoals[appName] ?: 0
-            val pastStreak = streakMap[appName] ?: 0 // 어제까지의 스트릭 (예: +1)
-
-            var finalStreak = pastStreak // 일단 어제 스트릭을 기본값으로
+            val pastStreak = streakMap[appName] ?: 0
+            var finalStreak = pastStreak
 
             if (goal > 0 && todayUsage > goal) {
-                // ⭐️ 오늘 목표가 있고, 오늘 사용량이 이미 목표를 넘었다면 (실패!)
                 if (pastStreak < 0) {
-                    // 어제도 실패했다면 (예: -1), 오늘 실패를 더해서 -2
                     finalStreak = pastStreak - 1
                 } else {
-                    // 어제는 성공했다면 (예: +1), 오늘 실패했으니 -1로 리셋
                     finalStreak = -1
                 }
             }
-            // ⭐️ --- [버그 수정 완료] --- ⭐️
 
             AppUsage(
                 appName = appName,
                 currentUsage = todayUsage,
                 goalTime = goal,
-                streak = finalStreak, // ⭐️ 수정된 finalStreak 사용
-                icon = appIcon
+                streak = finalStreak
+                // ⭐️ icon 필드 없음
             )
         }
-
         _appUsageList.postValue(newAppUsageList)
     }
 
+    // ... (parseUsageStats, calculateStreaks 함수는 이전과 동일) ...
     private fun parseUsageStats(stats: List<UsageStats>): Map<AppName, Int> {
         val usageMap = mutableMapOf<AppName, Int>()
         val appPackages = AppName.values().map { it.packageName }.toSet()
-
         for (stat in stats) {
             if (stat.packageName in appPackages) {
                 val appName = AppName.values().find { it.packageName == stat.packageName }!!
@@ -162,11 +162,8 @@ object UsageRepository {
 
         val streakMap = mutableMapOf<AppName, Int>()
         val todayStr = SimpleDateFormat("yyyy-MM-dd", Locale.KOREAN).format(Date())
-
-        // ⭐️ [수정] 오늘을 제외한 과거 기록
         val pastDays = dailyList.filter { it.date != todayStr }.sortedByDescending { it.date }
 
-        // ⭐️ [수정] 과거 기록이 없으면 0으로 반환
         if (pastDays.isEmpty()) {
             AppName.values().forEach { streakMap[it] = 0 }
             return streakMap
@@ -178,22 +175,17 @@ object UsageRepository {
                 streakMap[appName] = 0
                 continue
             }
-
-            // ⭐️ 어제(pastDays.first())의 성공/실패 여부
             val firstDayUsage = pastDays.first().appUsages[appName] ?: 0
             val wasSuccess = firstDayUsage <= goal
             var streak = 0
-
-            // 어제부터 과거로 가면서 연속 기록 확인
             for (day in pastDays) {
                 val usage = day.appUsages[appName] ?: 0
                 if ((usage <= goal) == wasSuccess) {
                     streak++
                 } else {
-                    break // 연속 기록 깨짐
+                    break
                 }
             }
-
             streakMap[appName] = if (wasSuccess) streak else -streak
         }
         return streakMap

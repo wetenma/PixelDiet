@@ -91,4 +91,7 @@ dependencies {
 
     // ⭐️ Coil 이미지 로딩 라이브러리 추가
     implementation("io.coil-kt:coil-compose:2.6.0")
+
+    // ⭐️ [신규] WorkManager(백그라운드 작업) 라이브러리
+    implementation("androidx.work:work-runtime-ktx:2.9.0")
 }

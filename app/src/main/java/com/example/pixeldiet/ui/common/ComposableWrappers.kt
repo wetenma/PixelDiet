@@ -8,10 +8,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.viewinterop.AndroidView
 import com.example.pixeldiet.model.CalendarDecoratorData
 import com.example.pixeldiet.model.DayStatus
-// ⭐️ 1. import 변경: LineChart -> BarChart
 import com.github.mikephil.charting.charts.BarChart
 import com.github.mikephil.charting.components.XAxis
-// ⭐️ 2. import 변경: LineData/Set -> BarData/Set/Entry
 import com.github.mikephil.charting.data.BarData
 import com.github.mikephil.charting.data.BarDataSet
 import com.github.mikephil.charting.data.BarEntry
@@ -23,7 +21,7 @@ import com.prolificinteractive.materialcalendarview.MaterialCalendarView
 import com.prolificinteractive.materialcalendarview.spans.DotSpan
 
 // ----------------------
-// MaterialCalendarView 래퍼 (이 부분은 동일)
+// MaterialCalendarView 래퍼
 // ----------------------
 @Composable
 fun WrappedMaterialCalendar(
@@ -40,40 +38,59 @@ fun WrappedMaterialCalendar(
                 )
                 topbarVisible = true
                 selectionMode = MaterialCalendarView.SELECTION_MODE_NONE
-                currentDate = CalendarDay.today()
+                // ✅ today 로 이동 (프로퍼티가 아니라 메서드 호출)
+                setCurrentDate(CalendarDay.today())
             }
         },
         update = { view ->
+            // 기존 데코레이터 제거
             view.removeDecorators()
-            val successDays = decoratorData.filter { it.status == DayStatus.SUCCESS }.map { it.date }.toSet()
-            val warningDays = decoratorData.filter { it.status == DayStatus.WARNING }.map { it.date }.toSet()
-            val failDays = decoratorData.filter { it.status == DayStatus.FAIL }.map { it.date }.toSet()
+
+            // 상태별로 날짜를 분리
+            val successDays = decoratorData
+                .filter { it.status == DayStatus.SUCCESS }
+                .map { it.date }
+                .toSet()
+
+            val warningDays = decoratorData
+                .filter { it.status == DayStatus.WARNING }
+                .map { it.date }
+                .toSet()
+
+            val failDays = decoratorData
+                .filter { it.status == DayStatus.FAIL }
+                .map { it.date }
+                .toSet()
 
             if (successDays.isNotEmpty()) {
-                view.addDecorator(StatusDecorator(dates = successDays, color = Color.BLUE))
+                view.addDecorator(StatusDecorator(successDays, Color.BLUE))
             }
             if (warningDays.isNotEmpty()) {
-                view.addDecorator(StatusDecorator(dates = warningDays, color = Color.parseColor("#FFC107")))
+                view.addDecorator(
+                    StatusDecorator(
+                        warningDays,
+                        Color.parseColor("#FFC107") // 노랑
+                    )
+                )
             }
             if (failDays.isNotEmpty()) {
-                view.addDecorator(StatusDecorator(dates = failDays, color = Color.RED))
+                view.addDecorator(StatusDecorator(failDays, Color.RED))
             }
         }
     )
 }
 
 // ----------------------
-// ⭐️ 3. [수정됨] MPAndroidChart 래퍼 (BarChart)
+// BarChart 래퍼
 // ----------------------
 @Composable
-fun WrappedBarChart( // ⭐️ 4. 이름 변경
+fun WrappedBarChart(
     modifier: Modifier = Modifier,
-    chartData: List<Entry> // ⭐️ 5. BarEntry는 Entry의 자식이므로 이 부분은 동일
+    chartData: List<Entry>
 ) {
     AndroidView(
         modifier = modifier,
         factory = { context ->
-            // ⭐️ 6. LineChart -> BarChart
             BarChart(context).apply {
                 layoutParams = LinearLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT,
@@ -82,30 +99,26 @@ fun WrappedBarChart( // ⭐️ 4. 이름 변경
                 xAxis.apply {
                     position = XAxis.XAxisPosition.BOTTOM
                     setDrawGridLines(true)
-                    granularity = 1f
+                    granularity = 1f      // 하루 간격
                 }
                 axisRight.isEnabled = false
                 description.isEnabled = false
-                setDrawValueAboveBar(false) // 막대 위에 값 표시 안 함
+                setDrawValueAboveBar(false)
             }
         },
-        update = { view -> // ⭐️ view는 이제 BarChart 타입
+        update = { view ->
             if (chartData.isEmpty()) {
                 view.clear()
                 view.invalidate()
                 return@AndroidView
             }
 
-            // ⭐️ 7. BarEntry로 변환 (Entry 리스트를 BarEntry 리스트로)
             val barEntries = chartData.map { BarEntry(it.x, it.y) }
 
-            // ⭐️ 8. LineDataSet -> BarDataSet
             val dataSet = BarDataSet(barEntries, "사용시간(분)").apply {
-                color = Color.BLUE // 막대 색상
-                setDrawValues(false) // 막대 위에 값 표시 안 함
+                color = Color.BLUE
+                setDrawValues(false)
             }
-
-            // ⭐️ 9. LineData -> BarData
             view.data = BarData(dataSet)
             view.invalidate()
         }
@@ -113,15 +126,17 @@ fun WrappedBarChart( // ⭐️ 4. 이름 변경
 }
 
 // ----------------------
-// 캘린더 데코레이터 (이 부분은 동일)
+// 캘린더 데코레이터
 // ----------------------
 private class StatusDecorator(
     private val dates: Set<CalendarDay>,
     private val color: Int
 ) : DayViewDecorator {
 
+    // 여기서 day가 칠해야 할 날짜인지 확인
     override fun shouldDecorate(day: CalendarDay): Boolean = dates.contains(day)
 
+    // 실제 꾸미기 (날짜 정보는 이미 위에서 필터링됨)
     override fun decorate(view: DayViewFacade) {
         view.addSpan(DotSpan(10f, color))
     }
