@@ -10,7 +10,6 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
-// ⭐️ 1. [수정됨] WrappedLineChart -> WrappedBarChart
 import com.example.pixeldiet.ui.common.WrappedBarChart
 import com.example.pixeldiet.ui.common.WrappedMaterialCalendar
 import com.example.pixeldiet.viewmodel.SharedViewModel
@@ -22,6 +21,9 @@ fun CalendarScreen(viewModel: SharedViewModel = viewModel()) {
     val statsText by viewModel.calendarStatsText.observeAsState("")
     val streakText by viewModel.streakText.observeAsState("")
     val chartData by viewModel.chartData.observeAsState(emptyList())
+
+    // ⭐️ [신규] ViewModel에서 목표 시간 가져오기
+    val goalTime by viewModel.filteredGoalTime.observeAsState(0)
 
     LazyColumn(
         modifier = Modifier.fillMaxSize().padding(16.dp),
@@ -47,10 +49,11 @@ fun CalendarScreen(viewModel: SharedViewModel = viewModel()) {
                     Text("이번 달 사용 시간", Modifier.fillMaxWidth(), textAlign = TextAlign.Center, fontSize = 16.sp)
                     Spacer(Modifier.height(16.dp))
 
-                    // ⭐️ 2. [수정됨] WrappedLineChart -> WrappedBarChart
+                    // ⭐️ [수정] WrappedBarChart에 goalTime 전달
                     WrappedBarChart(
                         modifier = Modifier.fillMaxSize(),
-                        chartData = chartData
+                        chartData = chartData,
+                        goalTime = goalTime // ⭐️ 전달!
                     )
                 }
             }
@@ -58,9 +61,7 @@ fun CalendarScreen(viewModel: SharedViewModel = viewModel()) {
     }
 }
 
-// ----------------------
-// FilterSpinner (이 부분은 동일)
-// ----------------------
+// (FilterSpinner 코드는 이전과 동일)
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun FilterSpinner(onFilterSelected: (String) -> Unit) {

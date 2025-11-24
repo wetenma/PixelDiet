@@ -9,11 +9,13 @@ import androidx.compose.ui.viewinterop.AndroidView
 import com.example.pixeldiet.model.CalendarDecoratorData
 import com.example.pixeldiet.model.DayStatus
 import com.github.mikephil.charting.charts.BarChart
+import com.github.mikephil.charting.components.LimitLine // ⭐️ import
 import com.github.mikephil.charting.components.XAxis
 import com.github.mikephil.charting.data.BarData
 import com.github.mikephil.charting.data.BarDataSet
 import com.github.mikephil.charting.data.BarEntry
 import com.github.mikephil.charting.data.Entry
+import com.github.mikephil.charting.formatter.ValueFormatter // ⭐️ import
 import com.prolificinteractive.materialcalendarview.CalendarDay
 import com.prolificinteractive.materialcalendarview.DayViewDecorator
 import com.prolificinteractive.materialcalendarview.DayViewFacade
@@ -38,44 +40,18 @@ fun WrappedMaterialCalendar(
                 )
                 topbarVisible = true
                 selectionMode = MaterialCalendarView.SELECTION_MODE_NONE
-                // ✅ today 로 이동 (프로퍼티가 아니라 메서드 호출)
                 setCurrentDate(CalendarDay.today())
             }
         },
         update = { view ->
-            // 기존 데코레이터 제거
             view.removeDecorators()
+            val successDays = decoratorData.filter { it.status == DayStatus.SUCCESS }.map { it.date }.toSet()
+            val warningDays = decoratorData.filter { it.status == DayStatus.WARNING }.map { it.date }.toSet()
+            val failDays = decoratorData.filter { it.status == DayStatus.FAIL }.map { it.date }.toSet()
 
-            // 상태별로 날짜를 분리
-            val successDays = decoratorData
-                .filter { it.status == DayStatus.SUCCESS }
-                .map { it.date }
-                .toSet()
-
-            val warningDays = decoratorData
-                .filter { it.status == DayStatus.WARNING }
-                .map { it.date }
-                .toSet()
-
-            val failDays = decoratorData
-                .filter { it.status == DayStatus.FAIL }
-                .map { it.date }
-                .toSet()
-
-            if (successDays.isNotEmpty()) {
-                view.addDecorator(StatusDecorator(successDays, Color.BLUE))
-            }
-            if (warningDays.isNotEmpty()) {
-                view.addDecorator(
-                    StatusDecorator(
-                        warningDays,
-                        Color.parseColor("#FFC107") // 노랑
-                    )
-                )
-            }
-            if (failDays.isNotEmpty()) {
-                view.addDecorator(StatusDecorator(failDays, Color.RED))
-            }
+            if (successDays.isNotEmpty()) view.addDecorator(StatusDecorator(successDays, Color.BLUE))
+            if (warningDays.isNotEmpty()) view.addDecorator(StatusDecorator(warningDays, Color.parseColor("#FFC107")))
+            if (failDays.isNotEmpty()) view.addDecorator(StatusDecorator(failDays, Color.RED))
         }
     )
 }
@@ -86,7 +62,8 @@ fun WrappedMaterialCalendar(
 @Composable
 fun WrappedBarChart(
     modifier: Modifier = Modifier,
-    chartData: List<Entry>
+    chartData: List<Entry>,
+    goalTime: Int // ⭐️ [신규] 목표 시간을 파라미터로 받음
 ) {
     AndroidView(
         modifier = modifier,
@@ -98,15 +75,55 @@ fun WrappedBarChart(
                 )
                 xAxis.apply {
                     position = XAxis.XAxisPosition.BOTTOM
-                    setDrawGridLines(true)
-                    granularity = 1f      // 하루 간격
+                    setDrawGridLines(false) // 세로선 제거 (깔끔하게)
+                    granularity = 1f
+                    valueFormatter = object : ValueFormatter() {
+                        override fun getFormattedValue(value: Float): String {
+                            return value.toInt().toString() // 날짜는 정수로
+                        }
+                    }
                 }
+
+                // ⭐️ Y축 (왼쪽) 설정: 시간 단위(h)로 변경
+                axisLeft.apply {
+                    setDrawGridLines(true)
+                    axisMinimum = 0f
+                    valueFormatter = object : ValueFormatter() {
+                        override fun getFormattedValue(value: Float): String {
+                            val hours = value / 60f
+                            return String.format("%.1fh", hours) // 예: 1.5h
+                        }
+                    }
+                }
+
                 axisRight.isEnabled = false
                 description.isEnabled = false
                 setDrawValueAboveBar(false)
+                legend.isEnabled = false // 범례 숨김
             }
         },
         update = { view ->
+            // ⭐️ 1. 목표선 (Red Line) 그리기
+            val leftAxis = view.axisLeft
+            leftAxis.removeAllLimitLines()
+
+            if (goalTime > 0) {
+                val limitLine = LimitLine(goalTime.toFloat(), "목표").apply {
+                    lineWidth = 2f
+                    lineColor = Color.RED
+                    textColor = Color.RED
+                    textSize = 12f
+                    enableDashedLine(10f, 10f, 0f) // 점선 효과
+                    labelPosition = LimitLine.LimitLabelPosition.RIGHT_TOP
+                }
+                leftAxis.addLimitLine(limitLine)
+                // 목표선이 그래프 밖으로 나가지 않게 최대값 조정
+                if (leftAxis.axisMaximum < goalTime) {
+                    leftAxis.axisMaximum = goalTime * 1.2f
+                }
+            }
+
+            // ⭐️ 2. 데이터 업데이트
             if (chartData.isEmpty()) {
                 view.clear()
                 view.invalidate()
@@ -114,9 +131,8 @@ fun WrappedBarChart(
             }
 
             val barEntries = chartData.map { BarEntry(it.x, it.y) }
-
-            val dataSet = BarDataSet(barEntries, "사용시간(분)").apply {
-                color = Color.BLUE
+            val dataSet = BarDataSet(barEntries, "사용시간").apply {
+                color = Color.parseColor("#2196F3") // 파란색
                 setDrawValues(false)
             }
             view.data = BarData(dataSet)
@@ -132,11 +148,7 @@ private class StatusDecorator(
     private val dates: Set<CalendarDay>,
     private val color: Int
 ) : DayViewDecorator {
-
-    // 여기서 day가 칠해야 할 날짜인지 확인
     override fun shouldDecorate(day: CalendarDay): Boolean = dates.contains(day)
-
-    // 실제 꾸미기 (날짜 정보는 이미 위에서 필터링됨)
     override fun decorate(view: DayViewFacade) {
         view.addSpan(DotSpan(10f, color))
     }

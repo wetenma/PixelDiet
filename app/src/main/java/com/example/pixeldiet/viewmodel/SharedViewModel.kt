@@ -1,12 +1,5 @@
 package com.example.pixeldiet.viewmodel
 
-// ⭐️ 8. 이 import들이 핵심
-import com.example.pixeldiet.model.*
-import com.example.pixeldiet.repository.NotificationPrefs
-import com.example.pixeldiet.repository.UsageRepository
-import com.github.mikephil.charting.data.Entry
-import com.prolificinteractive.materialcalendarview.CalendarDay
-
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.LiveData
@@ -14,14 +7,19 @@ import androidx.lifecycle.MediatorLiveData
 import androidx.lifecycle.MutableLiveData
 import androidx.lifecycle.map
 import androidx.lifecycle.viewModelScope
+import com.example.pixeldiet.model.*
+import com.example.pixeldiet.repository.UsageRepository
+import com.github.mikephil.charting.data.Entry
+import com.prolificinteractive.materialcalendarview.CalendarDay
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.*
 
 class SharedViewModel(application: Application) : AndroidViewModel(application) {
-    // ... (이하 코드는 이전과 동일) ...
+
     private val repository = UsageRepository
+
     val appUsageList: LiveData<List<AppUsage>> = repository.appUsageList
     private val dailyUsageList: LiveData<List<DailyUsage>> = repository.dailyUsageList
     val notificationSettings: LiveData<NotificationSettings> = repository.notificationSettings
@@ -33,7 +31,8 @@ class SharedViewModel(application: Application) : AndroidViewModel(application) 
         Pair(totalUsage, totalGoal)
     }
 
-    private val filteredGoalTime: LiveData<Int> = MediatorLiveData<Int>().apply {
+    // ⭐️ [수정] private 제거! (CalendarScreen에서 접근 가능하도록)
+    val filteredGoalTime: LiveData<Int> = MediatorLiveData<Int>().apply {
         addSource(appUsageList) { goals ->
             val filter = _selectedFilter.value
             value = if (filter == null) goals.sumOf { it.goalTime }
@@ -146,8 +145,7 @@ class SharedViewModel(application: Application) : AndroidViewModel(application) 
             else -> null
         }
     }
-    // ⭐️ [수정] Repository에 Context를 전달
     fun saveNotificationSettings(settings: NotificationSettings) = viewModelScope.launch {
-        repository.updateNotificationSettings(settings, getApplication()) // ⭐️ getApplication() 추가
+        repository.updateNotificationSettings(settings, getApplication())
     }
 }
