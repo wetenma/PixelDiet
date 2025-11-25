@@ -13,11 +13,9 @@ import com.example.pixeldiet.model.DailyUsage
 import com.example.pixeldiet.model.NotificationSettings
 import java.text.SimpleDateFormat
 import java.util.*
-import kotlin.random.Random
 
 object UsageRepository {
 
-    // ⭐️ SharedPreferences 인스턴스를 저장할 변수
     private var prefs: NotificationPrefs? = null
 
     private val _appUsageList = MutableLiveData<List<AppUsage>>()
@@ -31,37 +29,33 @@ object UsageRepository {
 
     private val currentGoals = mutableMapOf<AppName, Int>()
 
-    // ⭐️ [수정] init 블록: 0값 초기화
     init {
-        val initialList = AppName.values().map { appName ->
-            AppUsage(appName, 0, 0, 0) // icon이 없는 4개 파라미터
-        }
-        _appUsageList.postValue(initialList)
+        // 초기화 시 빈 리스트로 시작 (나중에 loadRealData에서 채움)
+        _appUsageList.postValue(emptyList())
     }
 
-    // ⭐️ [신규] SharedPreferences를 초기화하는 함수
-    // (Context가 필요한 시점에 ViewModel이 호출)
     private fun getPrefs(context: Context): NotificationPrefs {
         if (prefs == null) {
             prefs = NotificationPrefs(context.applicationContext)
-            // ⭐️ 초기화 시, SharedPreferences에서 설정을 불러와 LiveData에 반영
             _notificationSettings.postValue(prefs!!.loadNotificationSettings())
         }
         return prefs!!
     }
 
-    // ⭐️ [수정] SharedPreferences에 저장하도록 변경
-    fun updateNotificationSettings(settings: NotificationSettings, context: Context) { // ⭐️ Context 추가
-        // 1. SharedPreferences에 영구 저장
-        getPrefs(context).saveNotificationSettings(settings) // ⭐️ 전달받은 Context 사용
-        // 2. LiveData에 반영 (UI 즉시 업데이트용)
+    // ⭐️ [신규] 선택된 앱 목록 업데이트
+    fun updateSelectedApps(context: Context, newApps: List<AppName>) {
+        getPrefs(context).saveSelectedApps(newApps)
+    }
+
+    fun updateNotificationSettings(settings: NotificationSettings, context: Context) {
+        getPrefs(context).saveNotificationSettings(settings)
         _notificationSettings.postValue(settings)
     }
 
     fun updateGoalTimes(goals: Map<AppName, Int>) {
         currentGoals.clear()
         currentGoals.putAll(goals)
-        val currentList = _appUsageList.value!!
+        val currentList = _appUsageList.value ?: return
         val newList = currentList.map {
             it.copy(goalTime = currentGoals[it.appName] ?: 0)
         }
@@ -69,107 +63,112 @@ object UsageRepository {
     }
 
     suspend fun loadRealData(context: Context) {
-        // ⭐️ [수정] loadRealData가 호출될 때 prefs가 초기화되도록 보장
         val prefs = getPrefs(context)
+        // ⭐️ [수정] 저장된 앱 목록을 불러옵니다.
+        val targetApps = prefs.loadSelectedApps()
 
         val usageStatsManager = context.getSystemService(Context.USAGE_STATS_SERVICE) as UsageStatsManager
         val packageManager = context.packageManager
         val sdf = SimpleDateFormat("yyyy-MM-dd", Locale.KOREAN)
         val calendar = Calendar.getInstance()
 
-        // --- 1. 오늘 사용량 계산 ---
+        // 1. 오늘 사용량
         calendar.set(Calendar.HOUR_OF_DAY, 0); calendar.set(Calendar.MINUTE, 0); calendar.set(Calendar.SECOND, 0)
         val startTime = calendar.timeInMillis
         val endTime = System.currentTimeMillis()
         val todayStats = usageStatsManager.queryUsageStats(UsageStatsManager.INTERVAL_DAILY, startTime, endTime)
-        val todayUsageMap = parseUsageStats(todayStats)
+        val todayUsageMap = parseUsageStats(todayStats, targetApps)
 
-        // --- 2. 지난 30일 사용량 계산 ---
+        // 2. 과거 30일 사용량
         calendar.add(Calendar.DAY_OF_MONTH, -30)
         val thirtyDaysAgo = calendar.timeInMillis
         val dailyStats = usageStatsManager.queryUsageStats(UsageStatsManager.INTERVAL_DAILY, thirtyDaysAgo, endTime)
+
+        // ⭐️ [수정] targetApps에 있는 앱만 필터링
         val dailyUsageMap = mutableMapOf<String, MutableMap<AppName, Int>>()
-        val appPackages = AppName.values().map { it.packageName }.toSet()
+        val targetPackages = targetApps.map { it.packageName }.toSet()
 
         for (stat in dailyStats) {
-            if (stat.packageName in appPackages) {
-                val appName = AppName.values().find { it.packageName == stat.packageName }!!
-                val date = sdf.format(Date(stat.firstTimeStamp))
-                val usageInMinutes = (stat.totalTimeInForeground / (1000 * 60)).toInt()
-                val dayMap = dailyUsageMap.getOrPut(date) { mutableMapOf() }
-                dayMap[appName] = (dayMap[appName] ?: 0) + usageInMinutes
+            if (stat.packageName in targetPackages) {
+                // 앱 목록에 있는 경우만 처리
+                val appName = targetApps.find { it.packageName == stat.packageName }
+                if (appName != null) {
+                    val date = sdf.format(Date(stat.firstTimeStamp))
+                    val usageInMinutes = (stat.totalTimeInForeground / (1000 * 60)).toInt()
+                    val dayMap = dailyUsageMap.getOrPut(date) { mutableMapOf() }
+                    dayMap[appName] = (dayMap[appName] ?: 0) + usageInMinutes
+                }
             }
         }
+
         val newDailyList = dailyUsageMap.map { (date, usages) ->
-            DailyUsage(
-                date = date,
-                appUsages = mapOf(
-                    AppName.NAVER_WEBTOON to (usages[AppName.NAVER_WEBTOON] ?: 0),
-                    AppName.INSTAGRAM to (usages[AppName.INSTAGRAM] ?: 0),
-                    AppName.YOUTUBE to (usages[AppName.YOUTUBE] ?: 0)
-                )
-            )
+            DailyUsage(date = date, appUsages = usages)
         }.sortedBy { it.date }
         _dailyUsageList.postValue(newDailyList)
 
-        // --- 3. 어제까지의 스트릭 계산 ---
-        val streakMap = calculateStreaks(newDailyList, currentGoals)
+        // 3. 스트릭 계산
+        val streakMap = calculateStreaks(newDailyList, currentGoals, targetApps)
 
-        // --- 4. 최종 _appUsageList 생성 (아이콘 로직 없음) ---
-        val newAppUsageList = AppName.values().map { appName ->
+        // 4. 최종 리스트 생성 (targetApps 기준)
+        val newAppUsageList = targetApps.map { appName ->
+            val appIcon: Drawable? = try {
+                packageManager.getApplicationIcon(appName.packageName)
+            } catch (e: Exception) { null }
+
             val todayUsage = todayUsageMap[appName] ?: 0
             val goal = currentGoals[appName] ?: 0
             val pastStreak = streakMap[appName] ?: 0
             var finalStreak = pastStreak
 
             if (goal > 0 && todayUsage > goal) {
-                if (pastStreak < 0) {
-                    finalStreak = pastStreak - 1
-                } else {
-                    finalStreak = -1
-                }
+                if (pastStreak < 0) finalStreak = pastStreak - 1
+                else finalStreak = -1
             }
 
             AppUsage(
                 appName = appName,
                 currentUsage = todayUsage,
                 goalTime = goal,
-                streak = finalStreak
-                // ⭐️ icon 필드 없음
+                streak = finalStreak,
+                icon = appIcon
             )
         }
         _appUsageList.postValue(newAppUsageList)
     }
 
-    // ... (parseUsageStats, calculateStreaks 함수는 이전과 동일) ...
-    private fun parseUsageStats(stats: List<UsageStats>): Map<AppName, Int> {
+    // ⭐️ [수정] targetApps만 파싱
+    private fun parseUsageStats(stats: List<UsageStats>, targetApps: List<AppName>): Map<AppName, Int> {
         val usageMap = mutableMapOf<AppName, Int>()
-        val appPackages = AppName.values().map { it.packageName }.toSet()
+        val targetPackages = targetApps.map { it.packageName }.toSet()
+
         for (stat in stats) {
-            if (stat.packageName in appPackages) {
-                val appName = AppName.values().find { it.packageName == stat.packageName }!!
-                val usageInMinutes = (stat.totalTimeInForeground / (1000 * 60)).toInt()
-                usageMap[appName] = (usageMap[appName] ?: 0) + usageInMinutes
+            if (stat.packageName in targetPackages) {
+                val appName = targetApps.find { it.packageName == stat.packageName }
+                if (appName != null) {
+                    val usageInMinutes = (stat.totalTimeInForeground / (1000 * 60)).toInt()
+                    usageMap[appName] = (usageMap[appName] ?: 0) + usageInMinutes
+                }
             }
         }
         return usageMap
     }
 
+    // ⭐️ [수정] targetApps만 계산
     private fun calculateStreaks(
         dailyList: List<DailyUsage>,
-        goals: Map<AppName, Int>
+        goals: Map<AppName, Int>,
+        targetApps: List<AppName>
     ): Map<AppName, Int> {
-
         val streakMap = mutableMapOf<AppName, Int>()
         val todayStr = SimpleDateFormat("yyyy-MM-dd", Locale.KOREAN).format(Date())
         val pastDays = dailyList.filter { it.date != todayStr }.sortedByDescending { it.date }
 
         if (pastDays.isEmpty()) {
-            AppName.values().forEach { streakMap[it] = 0 }
+            targetApps.forEach { streakMap[it] = 0 }
             return streakMap
         }
 
-        for (appName in AppName.values()) {
+        for (appName in targetApps) {
             val goal = goals[appName] ?: 0
             if (goal == 0) {
                 streakMap[appName] = 0
@@ -180,11 +179,8 @@ object UsageRepository {
             var streak = 0
             for (day in pastDays) {
                 val usage = day.appUsages[appName] ?: 0
-                if ((usage <= goal) == wasSuccess) {
-                    streak++
-                } else {
-                    break
-                }
+                if ((usage <= goal) == wasSuccess) streak++
+                else break
             }
             streakMap[appName] = if (wasSuccess) streak else -streak
         }

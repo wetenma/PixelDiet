@@ -23,7 +23,13 @@ class SharedViewModel(application: Application) : AndroidViewModel(application) 
     val appUsageList: LiveData<List<AppUsage>> = repository.appUsageList
     private val dailyUsageList: LiveData<List<DailyUsage>> = repository.dailyUsageList
     val notificationSettings: LiveData<NotificationSettings> = repository.notificationSettings
-    private val _selectedFilter = MutableLiveData<AppName?>(null)
+
+    // ⭐️ [신규] 현재 선택된 앱 목록 (UI용)
+    val selectedApps: LiveData<List<AppName>> = appUsageList.map { list ->
+        list.map { it.appName }
+    }
+
+    private val _selectedFilter = MutableLiveData<AppName?>(null) // null = 전체
 
     val totalUsageData: LiveData<Pair<Int, Int>> = appUsageList.map { list ->
         val totalUsage = list.sumOf { it.currentUsage }
@@ -31,7 +37,6 @@ class SharedViewModel(application: Application) : AndroidViewModel(application) 
         Pair(totalUsage, totalGoal)
     }
 
-    // ⭐️ [수정] private 제거! (CalendarScreen에서 접근 가능하도록)
     val filteredGoalTime: LiveData<Int> = MediatorLiveData<Int>().apply {
         addSource(appUsageList) { goals ->
             val filter = _selectedFilter.value
@@ -45,6 +50,10 @@ class SharedViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
+    // ... (calendarDecoratorData, calendarStatsText, streakText, chartData 등 로직은 기존과 동일) ...
+    // (너무 길어서 생략하지만, 기존 코드 그대로 두셔도 됩니다. 로직이 Generic해서 자동으로 작동합니다.)
+    // 단, setCalendarFilter만 아래처럼 수정해주세요.
+
     val calendarDecoratorData: LiveData<List<CalendarDecoratorData>> = MediatorLiveData<List<CalendarDecoratorData>>().apply {
         fun updateDecorators() {
             val goals = appUsageList.value ?: return
@@ -55,11 +64,7 @@ class SharedViewModel(application: Application) : AndroidViewModel(application) 
             for (daily in dailies) {
                 val date = sdf.parse(daily.date) ?: continue
                 val cal = Calendar.getInstance(); cal.time = date
-                val calDay = CalendarDay.from(
-                    cal.get(Calendar.YEAR),
-                    cal.get(Calendar.MONTH) + 1,
-                    cal.get(Calendar.DAY_OF_MONTH)
-                )
+                val calDay = CalendarDay.from(cal.get(Calendar.YEAR), cal.get(Calendar.MONTH) + 1, cal.get(Calendar.DAY_OF_MONTH))
                 val (usage, goal) = if (filter == null) {
                     Pair(daily.appUsages.values.sum(), goals.sumOf { it.goalTime })
                 } else {
@@ -83,9 +88,7 @@ class SharedViewModel(application: Application) : AndroidViewModel(application) 
     val calendarStatsText: LiveData<String> = MediatorLiveData<String>().apply {
         addSource(calendarDecoratorData) { decorators ->
             val currentMonth = Calendar.getInstance().get(Calendar.MONTH) + 1
-            val successDays = decorators.count {
-                it.date.month == currentMonth && (it.status == DayStatus.SUCCESS || it.status == DayStatus.WARNING)
-            }
+            val successDays = decorators.count { it.date.month == currentMonth && (it.status == DayStatus.SUCCESS || it.status == DayStatus.WARNING) }
             val filterName = _selectedFilter.value?.displayName ?: "전체"
             value = "이번달 $filterName 목표 성공일: 총 ${successDays}일!"
         }
@@ -95,8 +98,7 @@ class SharedViewModel(application: Application) : AndroidViewModel(application) 
         fun updateStreak() {
             val filter = _selectedFilter.value
             val appList = appUsageList.value ?: return
-            val streak = if (filter == null) (appList.firstOrNull()?.streak ?: 0)
-            else (appList.find { it.appName == filter }?.streak ?: 0)
+            val streak = if (filter == null) (appList.firstOrNull()?.streak ?: 0) else (appList.find { it.appName == filter }?.streak ?: 0)
             val days = Math.abs(streak)
             val status = if (streak >= 0) "달성" else "실패"
             value = "${days}일 연속 목표 $status 중!"
@@ -111,14 +113,11 @@ class SharedViewModel(application: Application) : AndroidViewModel(application) 
             val filter = _selectedFilter.value
             val currentMonth = Calendar.getInstance().get(Calendar.MONTH) + 1
             val entries = mutableListOf<Entry>()
-            dailies
-                .filter { it.date.substring(5, 7).toInt() == currentMonth }
-                .forEach { daily ->
-                    val dayOfMonth = daily.date.substring(8, 10).toFloat()
-                    val usage = if (filter == null) daily.appUsages.values.sum()
-                    else daily.appUsages[filter] ?: 0
-                    entries.add(Entry(dayOfMonth, usage.toFloat()))
-                }
+            dailies.filter { it.date.substring(5, 7).toInt() == currentMonth }.forEach { daily ->
+                val dayOfMonth = daily.date.substring(8, 10).toFloat()
+                val usage = if (filter == null) daily.appUsages.values.sum() else daily.appUsages[filter] ?: 0
+                entries.add(Entry(dayOfMonth, usage.toFloat()))
+            }
             value = entries
         }
         addSource(dailyUsageList) { updateChart() }
@@ -134,17 +133,30 @@ class SharedViewModel(application: Application) : AndroidViewModel(application) 
             repository.loadRealData(getApplication())
         }
     }
+
+    // ⭐️ [신규] 앱 선택 업데이트 함수
+    fun updateSelectedApps(newApps: List<AppName>) = viewModelScope.launch(Dispatchers.IO) {
+        repository.updateSelectedApps(getApplication(), newApps)
+        repository.loadRealData(getApplication()) // 데이터 새로고침
+    }
+
     fun setGoalTimes(goals: Map<AppName, Int>) = viewModelScope.launch(Dispatchers.IO) {
         repository.updateGoalTimes(goals)
     }
+
+    // ⭐️ [수정] 캘린더 필터 로직 (이름으로 찾기)
     fun setCalendarFilter(filterName: String) {
-        _selectedFilter.value = when (filterName) {
-            "네이버 웹툰" -> AppName.NAVER_WEBTOON
-            "인스타그램" -> AppName.INSTAGRAM
-            "유튜브" -> AppName.YOUTUBE
-            else -> null
+        if (filterName == "전체") {
+            _selectedFilter.value = null
+        } else {
+            // 전체 앱 목록에서 이름 일치하는 것 찾기
+            val foundApp = AppName.values().find { it.displayName == filterName }
+            if (foundApp != null) {
+                _selectedFilter.value = foundApp
+            }
         }
     }
+
     fun saveNotificationSettings(settings: NotificationSettings) = viewModelScope.launch {
         repository.updateNotificationSettings(settings, getApplication())
     }

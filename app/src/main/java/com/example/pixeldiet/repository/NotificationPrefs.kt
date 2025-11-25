@@ -2,26 +2,41 @@ package com.example.pixeldiet.repository
 
 import android.content.Context
 import android.content.SharedPreferences
+import com.example.pixeldiet.model.AppName
 import com.example.pixeldiet.model.NotificationSettings
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-/**
- * SharedPreferences를 관리하는 헬퍼 클래스
- * - 알림 설정 (켜기/끄기, 반복 시간)
- * - 마지막 알림 보낸 시간/날짜 기록
- */
 class NotificationPrefs(context: Context) {
 
     private val prefs: SharedPreferences =
         context.getSharedPreferences("PixelDietPrefs", Context.MODE_PRIVATE)
 
-    // --- 오늘 날짜 (YYYY-MM-DD) ---
     private val todayString: String
         get() = SimpleDateFormat("yyyy-MM-dd", Locale.KOREAN).format(Date())
 
-    // --- 알림 설정 저장/로드 ---
+    // 선택된 앱 목록 저장
+    fun saveSelectedApps(selectedApps: List<AppName>) {
+        val joinedNames = selectedApps.joinToString(",") { it.name }
+        prefs.edit().putString("selected_apps", joinedNames).apply()
+    }
+
+    // 선택된 앱 목록 불러오기
+    fun loadSelectedApps(): List<AppName> {
+        val savedString = prefs.getString("selected_apps", null)
+        // ⭐️ [수정] 기본값으로 YOUTUBE를 사용합니다.
+        if (savedString.isNullOrEmpty()) {
+            return listOf(AppName.NAVER_WEBTOON, AppName.INSTAGRAM, AppName.YOUTUBE)
+        }
+
+        return try {
+            savedString.split(",").map { AppName.valueOf(it) }
+        } catch (e: Exception) {
+            // ⭐️ [수정] 예외 발생 시에도 YOUTUBE를 기본값으로 사용합니다.
+            listOf(AppName.NAVER_WEBTOON, AppName.INSTAGRAM, AppName.YOUTUBE)
+        }
+    }
 
     fun saveNotificationSettings(settings: NotificationSettings) {
         prefs.edit().apply {
@@ -44,42 +59,22 @@ class NotificationPrefs(context: Context) {
             total50 = prefs.getBoolean("total_50", true),
             total70 = prefs.getBoolean("total_70", true),
             total100 = prefs.getBoolean("total_100", true),
-            repeatIntervalMinutes = prefs.getInt("repeat_interval", 5) // 기본값 5분
+            repeatIntervalMinutes = prefs.getInt("repeat_interval", 5)
         )
     }
 
-    // --- "하루 한 번" 알림 날짜 기록 ---
-
-    /**
-     * @param type "ind_50", "ind_70", "total_50", "total_70"
-     * @return 오늘 이 타입의 알림을 보낸 적이 있으면 true
-     */
     fun hasSentToday(type: String): Boolean {
-        // "ind_50"라는 키에 "2025-11-17" (오늘 날짜)이 저장되어 있는지 확인
         return prefs.getString(type, null) == todayString
     }
 
-    /**
-     * @param type "ind_50", "ind_70", "total_50", "total_70"
-     */
     fun recordSentToday(type: String) {
-        // "ind_50" 키에 오늘 날짜("2025-11-17")를 저장
         prefs.edit().putString(type, todayString).apply()
     }
 
-    // --- "반복 알림" 시간 기록 ---
-
-    /**
-     * @param type "ind_100", "total_100"
-     * @return 마지막 100% 알림 보낸 시간 (타임스탬프)
-     */
     fun getLastRepeatSentTime(type: String): Long {
-        return prefs.getLong(type, 0L) // 0L = 보낸 적 없음
+        return prefs.getLong(type, 0L)
     }
 
-    /**
-     * @param type "ind_100", "total_100"
-     */
     fun recordRepeatSentTime(type: String) {
         prefs.edit().putLong(type, System.currentTimeMillis()).apply()
     }
